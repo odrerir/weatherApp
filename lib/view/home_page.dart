@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:weather/service/weather_service.dart';
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -11,20 +13,34 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final WeatherService weatherService = WeatherService();
   Map<String, dynamic>? weatherData;
+  Map<String, dynamic>? fiveDayForecast;
   String? errorMessage;
   final TextEditingController _controller = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    loadWeather();
+    // Inicializa formatação de data para pt_BR e só depois carrega os dados
+    initializeDateFormatting('pt_BR', null).then((_) {
+      loadWeather('guarapuava');
+    });
   }
 
-  Future<void> loadWeather([String city = 'Guarapuava']) async {
+  Future<void> loadWeather(String city) async {
+    setState(() {
+      // limpa mensagens antigas enquanto carrega
+      errorMessage = null;
+    });
+
     try {
-      var data = await weatherService.getWeather(city);
+      final results = await Future.wait([
+        weatherService.getWeather(city),
+        weatherService.getFiveDayForecast(city),
+      ]);
+
       setState(() {
-        weatherData = data;
+        weatherData = results[0] as Map<String, dynamic>?;
+        fiveDayForecast = results[1] as Map<String, dynamic>?;
         errorMessage = null;
       });
     } catch (e) {
@@ -34,31 +50,88 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  String _getIcon(bool isCurrent, [int index = 0]) {
+    String condition = '';
+
+    try {
+      if (isCurrent) {
+        condition = weatherData?['weather']?[0]?['main']?.toString().toLowerCase() ?? '';
+      } else {
+        final list = fiveDayForecast?['list'] as List<dynamic>?;
+        if (list != null && index >= 0 && index < list.length) {
+          condition = list[index]['weather'][0]['main'].toString().toLowerCase();
+        }
+      }
+    } catch (_) {
+      condition = '';
+    }
+
+    if (condition.contains('clear')) return 'assets/images/icons/sol.png';
+    if (condition.contains('cloud')) return 'assets/images/icons/nublado.png';
+    if (condition.contains('rain')) return 'assets/images/icons/chuva.png';
+    if (condition.contains('thunder')) return 'assets/images/icons/tempestade.png';
+
+    return 'assets/images/icons/sol.png';
+  }
+
+  String _getBackground() {
+    final condition = weatherData?['weather']?[0]?['main']?.toString().toLowerCase() ?? '';
+    if (condition.contains('clear')) return 'assets/images/background/telaSol.png';
+    if (condition.contains('cloud')) return 'assets/images/background/telaNublado.png';
+    if (condition.contains('rain')) return 'assets/images/background/telaChuva.png';
+    if (condition.contains('thunder')) return 'assets/images/background/telaTempestade.png';
+    return 'assets/images/background/telaSol.png';
+  }
+
+  // Formata "yyyy-mm-dd hh:mm:ss" para "dd/MM" sem usar intl (mas aqui usamos intl já inicializado)
+  String _formatDate(String dtTxt) {
+    try {
+      final dt = DateTime.parse(dtTxt);
+      return DateFormat('dd/MM', 'pt_BR').format(dt);
+    } catch (_) {
+      return dtTxt.split(' ').first; // fallback
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final condition = weatherData!['weather'][0]['main'].toString().toLowerCase();
-    String iconPath;
-    String backgroundPath;
-    if (condition.contains('clear')) {
-      iconPath = 'assets/images/icons/sol.png';
-      backgroundPath = 'assets/images/background/telaSol.png';
+    // Mostrar erro específico
+    if (errorMessage != null) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  errorMessage!,
+                  style: const TextStyle(color: Colors.red, fontSize: 18),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: () => loadWeather(_controller.text.isEmpty ? 'guarapuava' : _controller.text.trim()),
+                  child: const Text('Tentar novamente'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
-    else if (condition.contains('clouds')) {
-      iconPath = 'assets/images/icons/nublado.png';
-      backgroundPath = 'assets/images/background/telaNublado.png';
+
+    // Enquanto não tiver dados, mostra loading
+    if (weatherData == null || fiveDayForecast == null) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Center(child: CircularProgressIndicator(color: Colors.white)),
+        ),
+      );
     }
-    else if (condition.contains('rain')) {
-      iconPath = 'assets/images/icons/chuva.png';
-      backgroundPath = 'assets/images/background/telaChuva.png';
-    }
-    else if (condition.contains('thunderstorm')) {
-      iconPath = 'assets/images/icons/tempestade.png';
-      backgroundPath = 'assets/images/background/telaTempestade.png';
-    }
-    else {
-      iconPath = 'assets/images/icons/sol.png';
-      backgroundPath = 'assets/images/background/telaSol.png';
-    }
+
+    final iconPath = _getIcon(true);
+    final backgroundPath = _getBackground();
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -76,81 +149,143 @@ class _HomePageState extends State<HomePage> {
               borderRadius: BorderRadius.circular(30),
               borderSide: BorderSide.none,
             ),
-            suffixIcon: const Icon(Icons.search, color: Colors.black),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.search, color: Colors.black),
+              onPressed: () {
+                final value = _controller.text.trim();
+                if (value.isNotEmpty) {
+                  loadWeather(value);
+                }
+              },
+            ),
           ),
           textInputAction: TextInputAction.search,
-          onSubmitted: (value) => loadWeather(value),
+          onSubmitted: (value) {
+            final v = value.trim();
+            if (v.isNotEmpty) loadWeather(v);
+          },
         ),
       ),
-      body: weatherData == null
-          ? const Center(child: CircularProgressIndicator())
-          : Container(
-              decoration: BoxDecoration(
-                image: DecorationImage(
-                  image: AssetImage(backgroundPath),
-                  fit: BoxFit.cover,
-                ),
-              ),
-              child: SafeArea(
-                child: Column(
+      body: Container(
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage(backgroundPath),
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                const SizedBox(height: 40),
+
+                // CLIMA ATUAL
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const SizedBox(height: 40),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Image.asset(
-                          iconPath,
-                          width: 110,
-                          height: 110,
+                        // ÍCONE E DESCRIÇÃO
+                        Column(
+                          children: [
+                            Image.asset(iconPath, width: 110, height: 110),
+                            const SizedBox(height: 20),
+                            Text(
+                              (() {
+                                final desc = weatherData!['weather'][0]['description'].toString();
+                                if (desc.isEmpty) return '';
+                                return desc.replaceFirst(desc[0], desc[0].toUpperCase());
+                              })(),
+                              style: const TextStyle(
+                                fontSize: 20,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold
+                              ),
+                            ),
+                          ],
                         ),
+
                         const SizedBox(width: 80),
-                        Text(
-                          '${weatherData!['main']['temp'].toInt()}°',
-                          style: TextStyle(
-                            fontSize: 90,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
+
+                        // TEMPERATURA E CIDADE
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                              '${weatherData!['main']['temp'].toInt()}°',
+                              style: const TextStyle(
+                                fontSize: 90,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                            Text(
+                              weatherData!['name'],
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    const SizedBox(height: 30),
-
-                    // Grid com 4 cards
-                    Expanded(
-                      child: GridView.count(
-                        crossAxisCount: 2,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                        crossAxisSpacing: 15,
-                        mainAxisSpacing: 15,
-                        children: [
-                          _infoCard(
-                            'Sensação',
-                            '${weatherData!['main']['feels_like'].toInt()}°',
-                            Icons.thermostat,
-                          ),
-                          _infoCard(
-                            'Umidade',
-                            '${weatherData!['main']['humidity']}%',
-                            Icons.water_drop,
-                          ),
-                          _infoCard(
-                            'Vento',
-                            '${weatherData!['wind']['speed']} m/s',
-                            Icons.air,
-                          ),
-                          _infoCard(
-                            'Pressão',
-                            '${weatherData!['main']['pressure']} hPa',
-                            Icons.speed,
-                          ),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
-              ),
+
+                const SizedBox(height: 30),
+
+                // PREVISÃO DE 5 DIAS
+                SizedBox(
+                  height: 140,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: 5,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    itemBuilder: (context, index) {
+                        final dayIndex = (index + 1) * 8;
+                      final list = fiveDayForecast!['list'] as List<dynamic>;
+                      final safeIndex = (dayIndex < list.length) ? dayIndex : (list.length - 1);
+                      final item = list[safeIndex];
+                      final dateTxt = item['dt_txt'].toString();
+                      final formatted = _formatDate(dateTxt);
+                      final cond = item['weather'][0]['main'].toString().toLowerCase();
+
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 10),
+                        child: _fiveDays(cond, formatted, safeIndex),
+                      );
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // INFORMAÇÕES ATUAIS (grid 2x2)
+                GridView.count(
+                  crossAxisCount: 2,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  children: [
+                    _infoCard('Sensação', '${weatherData!['main']['feels_like'].toInt()}°', Icons.thermostat),
+                    _infoCard('Umidade', '${weatherData!['main']['humidity']}%', Icons.water_drop),
+                    _infoCard('Vento', '${weatherData!['wind']['speed']} m/s', Icons.air),
+                    _infoCard('Pressão', '${weatherData!['main']['pressure']} hPa', Icons.speed),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+              ],
             ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -167,22 +302,39 @@ class _HomePageState extends State<HomePage> {
           children: [
             Icon(icon, size: 36, color: Colors.black87),
             const SizedBox(height: 8),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 16, color: Colors.black87),
-            ),
+            Text(label, style: const TextStyle(fontSize: 16, color: Colors.black87)),
             const SizedBox(height: 4),
             Text(
               value,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87),
             ),
           ],
         ),
       ),
     );
   }
+
+  Widget _fiveDays(String condition, String date, int index) {
+    final iconPath = _getIcon(false, index);
+
+    return Container(
+      width: 90,
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(date, style: const TextStyle(fontSize: 16, color: Colors.black87, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Image.asset(iconPath, width: 50, height: 50),
+          ],
+        ),
+      ),
+    );
+  }
+
 }
