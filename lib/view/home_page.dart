@@ -15,12 +15,11 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? weatherData;
   Map<String, dynamic>? fiveDayForecast;
   String? errorMessage;
-  final TextEditingController _controller = TextEditingController();
+  final TextEditingController _search = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    // Inicializa formatação de data para pt_BR e só depois carrega os dados
     initializeDateFormatting('pt_BR', null).then((_) {
       loadWeather('guarapuava');
     });
@@ -28,7 +27,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> loadWeather(String city) async {
     setState(() {
-      // limpa mensagens antigas enquanto carrega
       errorMessage = null;
     });
 
@@ -47,6 +45,30 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         errorMessage = 'Erro ao carregar dados do tempo.';
       });
+
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Erro'),
+          content: const Text('Por favor, escreva uma cidade válida.',
+            style: TextStyle(
+            fontSize: 18,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('OK',
+                style: TextStyle(
+                fontSize: 18,
+              ),
+            ),
+            ),
+          ],
+        ),
+      );
     }
   }
 
@@ -83,44 +105,14 @@ class _HomePageState extends State<HomePage> {
     return 'assets/images/background/telaSol.png';
   }
 
-  // Formata "yyyy-mm-dd hh:mm:ss" para "dd/MM" sem usar intl (mas aqui usamos intl já inicializado)
   String _formatDate(String dtTxt) {
-    try {
       final dt = DateTime.parse(dtTxt);
       return DateFormat('dd/MM', 'pt_BR').format(dt);
-    } catch (_) {
-      return dtTxt.split(' ').first; // fallback
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Mostrar erro específico
-    if (errorMessage != null) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: SafeArea(
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  errorMessage!,
-                  style: const TextStyle(color: Colors.red, fontSize: 18),
-                ),
-                const SizedBox(height: 12),
-                ElevatedButton(
-                  onPressed: () => loadWeather(_controller.text.isEmpty ? 'guarapuava' : _controller.text.trim()),
-                  child: const Text('Tentar novamente'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
 
-    // Enquanto não tiver dados, mostra loading
     if (weatherData == null || fiveDayForecast == null) {
       return const Scaffold(
         backgroundColor: Colors.black,
@@ -139,7 +131,7 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: TextField(
-          controller: _controller,
+          controller: _search,
           decoration: InputDecoration(
             hintText: 'Digite a cidade...',
             hintStyle: const TextStyle(color: Colors.black54),
@@ -152,7 +144,7 @@ class _HomePageState extends State<HomePage> {
             suffixIcon: IconButton(
               icon: const Icon(Icons.search, color: Colors.black),
               onPressed: () {
-                final value = _controller.text.trim();
+                final value = _search.text.trim();
                 if (value.isNotEmpty) {
                   loadWeather(value);
                 }
@@ -246,7 +238,7 @@ class _HomePageState extends State<HomePage> {
                     itemCount: 5,
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     itemBuilder: (context, index) {
-                        final dayIndex = (index + 1) * 8;
+                      final dayIndex = (index + 1) * 8;
                       final list = fiveDayForecast!['list'] as List<dynamic>;
                       final safeIndex = (dayIndex < list.length) ? dayIndex : (list.length - 1);
                       final item = list[safeIndex];
@@ -264,7 +256,7 @@ class _HomePageState extends State<HomePage> {
 
                 const SizedBox(height: 20),
 
-                // INFORMAÇÕES ATUAIS (grid 2x2)
+                // INFORMAÇÕES ATUAIS
                 GridView.count(
                   crossAxisCount: 2,
                   shrinkWrap: true,
